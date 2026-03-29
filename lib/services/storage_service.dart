@@ -1,5 +1,4 @@
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 
 class StorageService {
   late SharedPreferences _prefs;
@@ -91,4 +90,13 @@ class StorageService {
 
   // Clear all data (logout)
   Future<void> clearAll() => _prefs.clear();
+
+  /// Clears session and profile fields but keeps onboarding and preferences.
+  Future<void> logout() async {
+    await clearToken();
+    await setAuthenticated(false);
+    await _prefs.remove('userName');
+    await _prefs.remove('userPhone');
+    await _prefs.remove('userEmail');
+  }
 }

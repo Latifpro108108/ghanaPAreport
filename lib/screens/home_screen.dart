@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../constants/app_constants.dart';
 import '../services/storage_service.dart';
 import '../services/location_service.dart';
+import '../data/accra_areas.dart';
 import '../data/mock_data.dart';
 import '../models/district.dart';
 import '../widgets/district_card.dart';
@@ -19,6 +20,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _isMapView = false;
   String _userArea = 'Detecting location...';
+  String? _userAreaSubtitle;
   List<ZoneStatus> _zones = [];
   bool _isLoadingLocation = true;
 
@@ -32,34 +34,51 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _isLoadingLocation = true);
 
     final position = await LocationService.getCurrentPosition();
+    final result = LocationService.resolveAccraNeighborhood(position);
 
-    if (position != null) {
-      final districts = LocationService.getGhanaDistricts();
-      final nearest = LocationService.findNearestDistrict(position, districts);
+    if (!mounted) return;
 
-      if (nearest != null && mounted) {
-        setState(() {
-          _userArea = nearest['district']['name'];
-          _zones = NeighborhoodData.generateMockZones(_userArea);
-          _isLoadingLocation = false;
-        });
-        return;
-      }
-    }
-
-    // Fallback to default
-    if (mounted) {
+    if (result is AccraLocationMatched) {
+      final n = result.neighborhood;
       setState(() {
-        _userArea = 'Accra Metro';
-        _zones = NeighborhoodData.generateMockZones('Accra Metro');
+        _userArea = n.shortLabel;
+        _userAreaSubtitle = n.description;
+        _zones = NeighborhoodData.generateZonesForAccraArea(
+          neighborhoodId: n.id,
+          displayName: n.shortLabel,
+        );
         _isLoadingLocation = false;
       });
+      return;
     }
+
+    if (result is AccraLocationOutside) {
+      setState(() {
+        _userArea = 'Accra (pick area)';
+        _userAreaSubtitle = result.message;
+        _zones = NeighborhoodData.generateZonesForAccraArea(
+          neighborhoodId: 'central-ridge',
+          displayName: _userArea,
+        );
+        _isLoadingLocation = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _userArea = 'Accra Metro (default)';
+      _userAreaSubtitle = 'Turn on location for your Accra neighborhood';
+      _zones = NeighborhoodData.generateZonesForAccraArea(
+        neighborhoodId: 'central-ridge',
+        displayName: _userArea,
+      );
+      _isLoadingLocation = false;
+    });
   }
 
   Future<List<District>> _getMonitoredDistricts() async {
     final storage = context.read<StorageService>();
-    final monitoredDistrictIds = await storage.getMonitoredDistricts();
+    final monitoredDistrictIds = storage.getMonitoredDistricts();
     return districts.where((d) => monitoredDistrictIds.contains(d.id)).toList();
   }
 
@@ -305,7 +324,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ),
                                           const SizedBox(width: 4),
                                           Text(
-                                            'Map View',
+                                            'Area view',
                                             style: TextStyle(
                                               fontSize: 14,
                                               fontWeight: FontWeight.w500,
@@ -461,12 +480,8 @@ class _HomeScreenState extends State<HomeScreen> {
           else
             NeighborhoodVisual(
               userArea: _userArea,
+              areaSubtitle: _userAreaSubtitle,
               zones: _zones,
-              onZoneTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Tapped zone in $_userArea')),
-                );
-              },
             ),
           const SizedBox(height: 16),
           // Refresh location button

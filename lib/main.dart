@@ -9,6 +9,7 @@ import 'screens/auth_screen.dart';
 import 'screens/otp_verification_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/districts_screen.dart';
+import 'screens/district_detail_screen.dart';
 import 'screens/alerts_screen.dart';
 import 'screens/profile_screen.dart';
 
@@ -109,6 +110,14 @@ class _MyAppState extends State<MyApp> {
           path: '/districts',
           name: 'districts',
           builder: (context, state) => const DistrictsScreen(),
+        ),
+        GoRoute(
+          path: '/district/:id',
+          name: 'districtDetail',
+          builder: (context, state) {
+            final id = state.pathParameters['id'] ?? '';
+            return DistrictDetailScreen(districtId: id);
+          },
         ),
         GoRoute(
           path: '/alerts',

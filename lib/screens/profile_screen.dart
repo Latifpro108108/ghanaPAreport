@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import '../constants/app_constants.dart';
+import '../services/storage_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -20,8 +22,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'helpfulVotes': 12,
   };
 
-  void _handleLogout() {
-    // Clear storage and navigate to auth
+  Future<void> _handleLogout() async {
+    await context.read<StorageService>().logout();
+    if (!mounted) return;
     context.go('/auth');
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Logged out successfully')),

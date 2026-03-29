@@ -6,11 +6,14 @@ import '../models/district.dart';
 class DistrictCard extends StatefulWidget {
   final District district;
   final bool showToggle;
+  /// When [showToggle] is true, called after the user changes the switch.
+  final ValueChanged<bool>? onMonitoredChanged;
 
   const DistrictCard({
     Key? key,
     required this.district,
     this.showToggle = false,
+    this.onMonitoredChanged,
   }) : super(key: key);
 
   @override
@@ -24,6 +27,14 @@ class _DistrictCardState extends State<DistrictCard> {
   void initState() {
     super.initState();
     isMonitored = widget.district.isMonitored;
+  }
+
+  @override
+  void didUpdateWidget(DistrictCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.district.isMonitored != widget.district.isMonitored) {
+      isMonitored = widget.district.isMonitored;
+    }
   }
 
   Color _getStatusColor(DistrictStatus status) {
@@ -101,7 +112,8 @@ class _DistrictCardState extends State<DistrictCard> {
                       value: isMonitored,
                       onChanged: (value) {
                         setState(() => isMonitored = value);
-                        // TODO: Handle toggle logic
+                        widget.district.isMonitored = value;
+                        widget.onMonitoredChanged?.call(value);
                       },
                       activeColor: AppColors.primary,
                     )

@@ -42,14 +42,15 @@ class _DistrictsScreenState extends State<DistrictsScreen> {
     }).toList();
   }
 
-  void _toggleDistrict(District district) async {
+  Future<void> _onDistrictMonitorChanged(
+      District district, bool monitored) async {
     final storageService = context.read<StorageService>();
 
     setState(() {
-      district.isMonitored = !district.isMonitored;
+      district.isMonitored = monitored;
     });
 
-    if (district.isMonitored) {
+    if (monitored) {
       await storageService.addMonitoredDistrict(district.id);
       _showMessage('Now monitoring ${district.name}');
     } else {
@@ -149,6 +150,10 @@ class _DistrictsScreenState extends State<DistrictsScreen> {
                         child: DistrictCard(
                           district: filteredDistricts[index],
                           showToggle: true,
+                          onMonitoredChanged: (monitored) => _onDistrictMonitorChanged(
+                                filteredDistricts[index],
+                                monitored,
+                              ),
                         ),
                       );
                     },

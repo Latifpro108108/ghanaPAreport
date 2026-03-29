@@ -56,11 +56,8 @@ dependencies:
   # Local Storage
   shared_preferences: ^2.2.0
   
-  # Maps
-  google_maps_flutter: ^2.5.0
-  
-  # Location Services
-  geolocator: ^10.1.0
+  # Location (GPS only — no map SDK; area UI is custom widgets)
+  geolocator: ^9.0.2
   
   # OTP Input
   pin_code_fields: ^8.0.1
