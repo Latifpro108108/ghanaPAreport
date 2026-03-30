@@ -8,6 +8,7 @@ import 'screens/onboarding_screen.dart';
 import 'screens/auth_screen.dart';
 import 'screens/otp_verification_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/announcements_screen.dart';
 import 'screens/districts_screen.dart';
 import 'screens/district_detail_screen.dart';
 import 'screens/alerts_screen.dart';
@@ -123,6 +124,11 @@ class _MyAppState extends State<MyApp> {
           path: '/alerts',
           name: 'alerts',
           builder: (context, state) => const AlertsScreen(),
+        ),
+        GoRoute(
+          path: '/announcements',
+          name: 'announcements',
+          builder: (context, state) => const AnnouncementsScreen(),
         ),
         GoRoute(
           path: '/profile',

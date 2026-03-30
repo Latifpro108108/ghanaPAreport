@@ -1,15 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:geolocator/geolocator.dart';
 import '../constants/app_constants.dart';
 import '../services/storage_service.dart';
 import '../services/location_service.dart';
-import '../data/accra_areas.dart';
-import '../data/mock_data.dart';
-import '../models/district.dart';
-import '../widgets/district_card.dart';
-import '../widgets/neighborhood_visual.dart';
+import '../services/openstreetmap_service.dart';
 
+/// IMPROVED Home Screen - Time-based voting with visual comparison
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -18,499 +17,493 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  bool _isMapView = false;
-  String _userArea = 'Detecting location...';
-  String? _userAreaSubtitle;
-  List<ZoneStatus> _zones = [];
+  String? _homeAreaName;
+  String _currentAreaName = 'Detecting...';
+  String? _currentAreaContext;
   bool _isLoadingLocation = true;
+  StreamSubscription<Position>? _locationStream;
+
+  // Store votes with timestamps per area: areaId -> list of votes
+  Map<String, List<VoteData>> _areaVotes = {};
 
   @override
   void initState() {
     super.initState();
-    _detectUserLocation();
+    _loadHomeArea();
+    _startLocationTracking();
   }
 
-  Future<void> _detectUserLocation() async {
-    setState(() => _isLoadingLocation = true);
+  @override
+  void dispose() {
+    _locationStream?.cancel();
+    super.dispose();
+  }
 
-    final position = await LocationService.getCurrentPosition();
-    final result = LocationService.resolveAccraNeighborhood(position);
-
-    if (!mounted) return;
-
-    if (result is AccraLocationMatched) {
-      final n = result.neighborhood;
-      setState(() {
-        _userArea = n.shortLabel;
-        _userAreaSubtitle = n.description;
-        _zones = NeighborhoodData.generateZonesForAccraArea(
-          neighborhoodId: n.id,
-          displayName: n.shortLabel,
-        );
-        _isLoadingLocation = false;
-      });
-      return;
-    }
-
-    if (result is AccraLocationOutside) {
-      setState(() {
-        _userArea = 'Accra (pick area)';
-        _userAreaSubtitle = result.message;
-        _zones = NeighborhoodData.generateZonesForAccraArea(
-          neighborhoodId: 'central-ridge',
-          displayName: _userArea,
-        );
-        _isLoadingLocation = false;
-      });
-      return;
-    }
-
+  void _loadHomeArea() {
+    final storage = context.read<StorageService>();
     setState(() {
-      _userArea = 'Accra Metro (default)';
-      _userAreaSubtitle = 'Turn on location for your Accra neighborhood';
-      _zones = NeighborhoodData.generateZonesForAccraArea(
-        neighborhoodId: 'central-ridge',
-        displayName: _userArea,
-      );
-      _isLoadingLocation = false;
+      _homeAreaName = storage.getHomeAreaName();
     });
   }
 
-  Future<List<District>> _getMonitoredDistricts() async {
-    final storage = context.read<StorageService>();
-    final monitoredDistrictIds = storage.getMonitoredDistricts();
-    return districts.where((d) => monitoredDistrictIds.contains(d.id)).toList();
+  void _startLocationTracking() {
+    _updateCurrentLocation();
+    _locationStream = LocationService.getLocationStream().listen((position) {
+      _updateCurrentLocationFromPosition(position);
+    });
+  }
+
+  Future<void> _updateCurrentLocation() async {
+    final position = await LocationService.getCurrentPosition();
+    await _updateCurrentLocationFromPosition(position);
+  }
+
+  Future<void> _updateCurrentLocationFromPosition(Position? position) async {
+    if (!mounted) return;
+    if (position == null) {
+      setState(() {
+        _currentAreaName = 'Location unavailable';
+        _isLoadingLocation = false;
+      });
+      return;
+    }
+
+    final place = await OpenStreetMapService.reverseGeocode(
+      position.latitude,
+      position.longitude,
+    );
+
+    if (place != null) {
+      setState(() {
+        _currentAreaName = place.shortName;
+        _currentAreaContext = place.areaContext;
+        _isLoadingLocation = false;
+      });
+    }
+  }
+
+  void _setOrChangeHomeArea() async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => SetHomeAreaDialog(
+        currentArea: _homeAreaName,
+      ),
+    );
+    if (result != null && result.isNotEmpty) {
+      final storage = context.read<StorageService>();
+      await storage.saveHomeArea(result, 0, 0);
+      setState(() {
+        _homeAreaName = result;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Home area updated to: $result')),
+      );
+    }
+  }
+
+  void _votePowerStatus(String areaId, PowerStatus status) {
+    final now = DateTime.now();
+
+    setState(() {
+      if (!_areaVotes.containsKey(areaId)) {
+        _areaVotes[areaId] = [];
+      }
+      _areaVotes[areaId]!.add(VoteData(status: status, timestamp: now));
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content:
+            Text('Thank you! Your report has been recorded with timestamp.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // Get recent votes only (last 6 hours) for accurate status
+  List<VoteData> _getRecentVotes(String areaId) {
+    final allVotes = _areaVotes[areaId] ?? [];
+    final cutoff = DateTime.now().subtract(const Duration(hours: 6));
+    return allVotes.where((v) => v.timestamp.isAfter(cutoff)).toList();
+  }
+
+  // Calculate current status based on most recent votes
+  PowerStatus _getCurrentStatus(String areaId) {
+    final recentVotes = _getRecentVotes(areaId);
+    if (recentVotes.isEmpty) return PowerStatus.unknown;
+
+    // Sort by timestamp (newest first)
+    recentVotes.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+    // Get votes from last 30 minutes only for current status
+    final veryRecent = recentVotes
+        .where(
+          (v) => v.timestamp
+              .isAfter(DateTime.now().subtract(const Duration(minutes: 30))),
+        )
+        .toList();
+
+    if (veryRecent.isNotEmpty) {
+      // Count ON vs OFF in last 30 min
+      final onCount =
+          veryRecent.where((v) => v.status == PowerStatus.on).length;
+      final offCount =
+          veryRecent.where((v) => v.status == PowerStatus.off).length;
+      return onCount >= offCount ? PowerStatus.on : PowerStatus.off;
+    }
+
+    // If no votes in 30 min, use most recent single vote
+    return recentVotes.first.status;
+  }
+
+  String _getTimeAgo(DateTime time) {
+    final diff = DateTime.now().difference(time);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+    if (diff.inHours < 24) return '${diff.inHours} hours ago';
+    return '${diff.inDays} days ago';
   }
 
   @override
   Widget build(BuildContext context) {
+    final isAtHome = _homeAreaName == _currentAreaName;
+    final homeAreaId = _homeAreaName?.toLowerCase().replaceAll(' ', '_') ?? '';
+    final currentAreaId = _currentAreaName.toLowerCase().replaceAll(' ', '_');
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF9FAFB),
-      body: FutureBuilder<List<District>>(
-        future: _getMonitoredDistricts(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final monitoredDistricts = snapshot.data ?? [];
-          final allDistricts = districts;
-          final outageCount = allDistricts
-              .where((d) => d.status == DistrictStatus.outage)
-              .length;
-          final restoredCount = allDistricts
-              .where((d) => d.status == DistrictStatus.restored)
-              .length;
-
-          return Stack(
+      backgroundColor: const Color(0xFFF5F5F5),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SafeArea(
-                child: Column(
-                  children: [
-                    // Header - Matches React exactly
-                    Container(
-                      color: Colors.white,
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                      child: Column(
-                        children: [
-                          // Title row with notification
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'PowerAlert GH',
-                                    style: TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFF111827),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'Community Power Monitoring',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: AppColors.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              GestureDetector(
-                                onTap: () => context.go('/alerts'),
-                                child: Stack(
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(8),
-                                      child: const Icon(
-                                        Icons.notifications_outlined,
-                                        color: Color(0xFF4B5563),
-                                        size: 24,
-                                      ),
-                                    ),
-                                    // Red notification dot
-                                    Positioned(
-                                      top: 6,
-                                      right: 6,
-                                      child: Container(
-                                        width: 8,
-                                        height: 8,
-                                        decoration: const BoxDecoration(
-                                          color: Colors.red,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          // Stats row - Matches React (red/green cards side by side)
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFFEF2F2),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                        color: const Color(0xFFFEE2E2)),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        outageCount.toString(),
-                                        style: const TextStyle(
-                                          fontSize: 24,
-                                          fontWeight: FontWeight.bold,
-                                          color: Color(0xFFDC2626),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      const Text(
-                                        'Active Outages',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Color(0xFFB91C1C),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF0FDF4),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                        color: const Color(0xFFDCFCE7)),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        restoredCount.toString(),
-                                        style: const TextStyle(
-                                          fontSize: 24,
-                                          fontWeight: FontWeight.bold,
-                                          color: Color(0xFF059669),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      const Text(
-                                        'Recently Restored',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Color(0xFF047857),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          // View Toggle - Matches React segmented control
-                          Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF3F4F6),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: GestureDetector(
-                                    onTap: () =>
-                                        setState(() => _isMapView = false),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 8),
-                                      decoration: BoxDecoration(
-                                        color: !_isMapView
-                                            ? Colors.white
-                                            : Colors.transparent,
-                                        borderRadius: BorderRadius.circular(6),
-                                        boxShadow: !_isMapView
-                                            ? [
-                                                BoxShadow(
-                                                  color: Colors.black
-                                                      .withOpacity(0.05),
-                                                  blurRadius: 2,
-                                                  offset: const Offset(0, 1),
-                                                ),
-                                              ]
-                                            : null,
-                                      ),
-                                      child: Text(
-                                        'My Districts',
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                          color: !_isMapView
-                                              ? AppColors.primary
-                                              : const Color(0xFF4B5563),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: GestureDetector(
-                                    onTap: () =>
-                                        setState(() => _isMapView = true),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 8),
-                                      decoration: BoxDecoration(
-                                        color: _isMapView
-                                            ? Colors.white
-                                            : Colors.transparent,
-                                        borderRadius: BorderRadius.circular(6),
-                                        boxShadow: _isMapView
-                                            ? [
-                                                BoxShadow(
-                                                  color: Colors.black
-                                                      .withOpacity(0.05),
-                                                  blurRadius: 2,
-                                                  offset: const Offset(0, 1),
-                                                ),
-                                              ]
-                                            : null,
-                                      ),
-                                      child: Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          Icon(
-                                            Icons.location_on_outlined,
-                                            size: 16,
-                                            color: _isMapView
-                                                ? AppColors.primary
-                                                : const Color(0xFF4B5563),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            'Area view',
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w500,
-                                              color: _isMapView
-                                                  ? AppColors.primary
-                                                  : const Color(0xFF4B5563),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
+              _buildHeader(),
+              const SizedBox(height: 20),
+
+              // VISUAL: Power ON vs OFF vote comparison for current area
+              if (!_isLoadingLocation) _buildVoteComparisonCard(currentAreaId),
+              const SizedBox(height: 20),
+
+              // My Home Area Card with Change button
+              _buildSectionTitle('My Home Area'),
+              const SizedBox(height: 8),
+              _homeAreaName != null
+                  ? _buildHomeAreaCard(homeAreaId, isAtHome)
+                  : _buildSetHomeAreaPrompt(),
+              const SizedBox(height: 20),
+
+              // Current Location Card with voting
+              _buildSectionTitle('Where I Am Now'),
+              const SizedBox(height: 8),
+              _buildCurrentLocationCard(currentAreaId, isAtHome),
+              const SizedBox(height: 20),
+
+              // Recent Reports Timeline
+              if (_areaVotes[currentAreaId]?.isNotEmpty == true) ...[
+                _buildSectionTitle('Recent Reports Here'),
+                const SizedBox(height: 8),
+                _buildReportsTimeline(currentAreaId),
+                const SizedBox(height: 20),
+              ],
+
+              // ECG News
+              _buildSectionTitle('ECG News'),
+              const SizedBox(height: 8),
+              _buildAnnouncementPreview(),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: _buildBottomNav(),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.ghanaGold,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.flash_on, color: Colors.black87, size: 28),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('PowerAlert GH',
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87)),
+                Text('Community Power Monitoring',
+                    style: TextStyle(fontSize: 13, color: Colors.black54)),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              _isLoadingLocation ? '...' : _currentAreaName.split(' ').first,
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Text(title,
+        style: const TextStyle(
+            fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87));
+  }
+
+  // NEW: Visual vote comparison bar chart
+  Widget _buildVoteComparisonCard(String areaId) {
+    final recentVotes = _getRecentVotes(areaId);
+    final onCount = recentVotes.where((v) => v.status == PowerStatus.on).length;
+    final offCount =
+        recentVotes.where((v) => v.status == PowerStatus.off).length;
+    final total = onCount + offCount;
+
+    final onPercent = total > 0 ? (onCount / total * 100) : 0;
+    final offPercent = total > 0 ? (offCount / total * 100) : 0;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(_currentAreaName,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.bold)),
+              if (total > 0)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: onCount >= offCount
+                        ? const Color(0xFF4CAF50).withOpacity(0.1)
+                        : const Color(0xFFE53935).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: onCount >= offCount
+                          ? const Color(0xFF4CAF50)
+                          : const Color(0xFFE53935),
                     ),
-                    // Content
-                    Expanded(
-                      child: !_isMapView
-                          ? _buildDistrictsList(monitoredDistricts)
-                          : _buildMapView(),
-                    ),
-                  ],
-                ),
-              ),
-              // FAB - Positioned above bottom nav like React
-              Positioned(
-                bottom: 80,
-                right: 24,
-                child: GestureDetector(
-                  onTap: () => _showReportModal(context),
-                  child: Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.25),
-                          blurRadius: 8,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.add,
-                      color: Colors.white,
-                      size: 28,
+                  ),
+                  child: Text(
+                    onCount >= offCount ? 'LIKELY ON' : 'LIKELY OFF',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: onCount >= offCount
+                          ? const Color(0xFF4CAF50)
+                          : const Color(0xFFE53935),
                     ),
                   ),
                 ),
-              ),
             ],
-          );
-        },
-      ),
-      bottomNavigationBar: _buildBottomNav(context),
-    );
-  }
+          ),
+          const SizedBox(height: 12),
+          const Text('Power Status Votes (last 6 hours):',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+          const SizedBox(height: 8),
 
-  Widget _buildDistrictsList(List<District> monitoredDistricts) {
-    if (monitoredDistricts.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text(
-              'No districts monitored yet',
-              style: TextStyle(
-                fontSize: 16,
-                color: Color(0xFF6B7280),
-              ),
+          // Bar chart
+          Container(
+            height: 32,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              color: Colors.grey.shade200,
             ),
-            const SizedBox(height: 16),
-            GestureDetector(
-              onTap: () => context.go('/districts'),
-              child: const Text(
-                'Browse Districts',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.primary,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: monitoredDistricts.length,
-      itemBuilder: (context, index) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: DistrictCard(district: monitoredDistricts[index]),
-        );
-      },
-    );
-  }
-
-  Widget _buildMapView() {
-    if (_isLoadingLocation) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
-    }
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          // Location detection button
-          if (_userArea == 'Detecting location...')
-            GestureDetector(
-              onTap: _detectUserLocation,
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFDBEAFE),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFF93C5FD)),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(
-                      Icons.location_searching,
-                      color: Color(0xFF2563EB),
-                    ),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Tap to detect your location',
-                        style: TextStyle(
-                          color: Color(0xFF1E40AF),
-                          fontWeight: FontWeight.w500,
+            child: total > 0
+                ? Row(
+                    children: [
+                      // Green bar for ON votes
+                      Expanded(
+                        flex: onCount,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF4CAF50),
+                            borderRadius: BorderRadius.only(
+                              topLeft: const Radius.circular(16),
+                              bottomLeft: const Radius.circular(16),
+                              topRight: offCount == 0
+                                  ? const Radius.circular(16)
+                                  : Radius.zero,
+                              bottomRight: offCount == 0
+                                  ? const Radius.circular(16)
+                                  : Radius.zero,
+                            ),
+                          ),
+                          child: onCount > 0
+                              ? Center(
+                                  child: Text(
+                                    '$onCount ON',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                )
+                              : null,
                         ),
                       ),
+                      // Red bar for OFF votes
+                      Expanded(
+                        flex: offCount,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE53935),
+                            borderRadius: BorderRadius.only(
+                              topRight: const Radius.circular(16),
+                              bottomRight: const Radius.circular(16),
+                              topLeft: onCount == 0
+                                  ? const Radius.circular(16)
+                                  : Radius.zero,
+                              bottomLeft: onCount == 0
+                                  ? const Radius.circular(16)
+                                  : Radius.zero,
+                            ),
+                          ),
+                          child: offCount > 0
+                              ? Center(
+                                  child: Text(
+                                    '$offCount OFF',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                )
+                              : null,
+                        ),
+                      ),
+                    ],
+                  )
+                : const Center(
+                    child: Text(
+                      'No reports yet - be the first!',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
                     ),
-                    Icon(
-                      Icons.chevron_right,
-                      color: Color(0xFF2563EB),
-                    ),
+                  ),
+          ),
+          if (total > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('${onPercent.toInt()}% say Power ON',
+                      style: const TextStyle(
+                          fontSize: 11, color: Color(0xFF4CAF50))),
+                  Text('${offPercent.toInt()}% say No Power',
+                      style: const TextStyle(
+                          fontSize: 11, color: Color(0xFFE53935))),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHomeAreaCard(String homeAreaId, bool isAtHome) {
+    final homeStatus = _getCurrentStatus(homeAreaId);
+    final recentVotes = _getRecentVotes(homeAreaId);
+    final lastReport = recentVotes.isNotEmpty ? recentVotes.first : null;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isAtHome ? AppColors.ghanaGold : Colors.grey.shade300,
+          width: isAtHome ? 2 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: isAtHome
+                      ? AppColors.ghanaGold.withOpacity(0.2)
+                      : Colors.grey.shade100,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.home,
+                    color: isAtHome ? Colors.black87 : Colors.grey, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(_homeAreaName!,
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w600)),
+                    if (isAtHome)
+                      const Text('You are currently here',
+                          style: TextStyle(fontSize: 12, color: Colors.green)),
                   ],
                 ),
               ),
-            )
-          else
-            NeighborhoodVisual(
-              userArea: _userArea,
-              areaSubtitle: _userAreaSubtitle,
-              zones: _zones,
+              _buildStatusBadge(homeStatus),
+            ],
+          ),
+          if (lastReport != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8, left: 46),
+              child: Text(
+                'Last report: ${_getTimeAgo(lastReport.timestamp)}',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+              ),
             ),
-          const SizedBox(height: 16),
-          // Refresh location button
+          const SizedBox(height: 12),
+          // Change Home Area button
           GestureDetector(
-            onTap: _detectUserLocation,
+            onTap: _setOrChangeHomeArea,
             child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Colors.grey.shade100,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFE5E7EB)),
+                border: Border.all(color: Colors.grey.shade300),
               ),
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.my_location,
-                    size: 18,
-                    color: Color(0xFF6B7280),
-                  ),
-                  SizedBox(width: 8),
-                  Text(
-                    'Refresh Location',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFF6B7280),
-                    ),
-                  ),
+                  Icon(Icons.edit_location, size: 16, color: Colors.black54),
+                  SizedBox(width: 4),
+                  Text('Change Home Area',
+                      style: TextStyle(fontSize: 12, color: Colors.black54)),
                 ],
               ),
             ),
@@ -520,15 +513,277 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildBottomNav(BuildContext context) {
-    final currentPath = GoRouterState.of(context).uri.path;
+  Widget _buildSetHomeAreaPrompt() {
+    return GestureDetector(
+      onTap: _setOrChangeHomeArea,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.ghanaGold, width: 2),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.add_location, color: Colors.black87),
+            SizedBox(width: 12),
+            Expanded(
+                child: Text('Set your home area',
+                    style: TextStyle(fontWeight: FontWeight.w500))),
+            Icon(Icons.arrow_forward_ios, size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCurrentLocationCard(String areaId, bool isAtHome) {
+    final status = _getCurrentStatus(areaId);
+    final recentVotes = _getRecentVotes(areaId);
+    final lastReport = recentVotes.isNotEmpty ? recentVotes.first : null;
 
     return Container(
-      decoration: const BoxDecoration(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(
-          top: BorderSide(color: Color(0xFFE5E7EB)),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_isLoadingLocation)
+            const Row(
+              children: [
+                SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2)),
+                SizedBox(width: 8),
+                Text('Finding your location...'),
+              ],
+            )
+          else
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(_currentAreaName,
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w600)),
+                    if (_currentAreaContext != null)
+                      Text(_currentAreaContext!,
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade600)),
+                  ],
+                ),
+                _buildStatusBadge(status),
+              ],
+            ),
+          if (!_isLoadingLocation) ...[
+            if (lastReport != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Last report: ${_getTimeAgo(lastReport.timestamp)}',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+              ),
+            const SizedBox(height: 12),
+            const Divider(),
+            const SizedBox(height: 8),
+            const Text('Report current power status:',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => _votePowerStatus(areaId, PowerStatus.on),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE8F5E9),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF4CAF50)),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.flash_on,
+                              color: Color(0xFF4CAF50), size: 18),
+                          SizedBox(width: 4),
+                          Text('Power ON',
+                              style: TextStyle(
+                                  color: Color(0xFF4CAF50),
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => _votePowerStatus(areaId, PowerStatus.off),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFEBEE),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFE53935)),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.flash_off,
+                              color: Color(0xFFE53935), size: 18),
+                          SizedBox(width: 4),
+                          Text('No Power',
+                              style: TextStyle(
+                                  color: Color(0xFFE53935),
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReportsTimeline(String areaId) {
+    final recentVotes = _getRecentVotes(areaId);
+    // Show last 5 votes
+    final displayVotes = recentVotes.take(5).toList();
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: displayVotes.map((vote) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Icon(
+                  vote.status == PowerStatus.on
+                      ? Icons.flash_on
+                      : Icons.flash_off,
+                  color: vote.status == PowerStatus.on
+                      ? const Color(0xFF4CAF50)
+                      : const Color(0xFFE53935),
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  vote.status == PowerStatus.on ? 'Power ON' : 'No Power',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: vote.status == PowerStatus.on
+                        ? const Color(0xFF4CAF50)
+                        : const Color(0xFFE53935),
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  _getTimeAgo(vote.timestamp),
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildStatusBadge(PowerStatus status) {
+    Color color;
+    String text;
+    switch (status) {
+      case PowerStatus.on:
+        color = const Color(0xFF4CAF50);
+        text = 'ON';
+        break;
+      case PowerStatus.off:
+        color = const Color(0xFFE53935);
+        text = 'OFF';
+        break;
+      case PowerStatus.unknown:
+        color = Colors.grey;
+        text = '?';
+        break;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color),
+      ),
+      child: Text(text,
+          style: TextStyle(
+              fontSize: 12, fontWeight: FontWeight.bold, color: color)),
+    );
+  }
+
+  Widget _buildAnnouncementPreview() {
+    return GestureDetector(
+      onTap: () => context.go('/announcements'),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade300),
         ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.ghanaGold.withOpacity(0.2),
+                shape: BoxShape.circle,
+              ),
+              child:
+                  const Icon(Icons.campaign, color: Colors.black87, size: 20),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Scheduled Maintenance',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  Text('ECG • 2 hours ago',
+                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomNav() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey.shade300)),
       ),
       child: SafeArea(
         top: false,
@@ -537,30 +792,13 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
+              _buildNavItem(Icons.home, 'Home', true),
+              _buildNavItem(Icons.notifications, 'Alerts', false,
+                  () => context.go('/alerts')),
+              _buildNavItem(Icons.campaign, 'News', false,
+                  () => context.go('/announcements')),
               _buildNavItem(
-                icon: Icons.home_outlined,
-                label: 'Home',
-                isActive: currentPath == '/home',
-                onTap: () {},
-              ),
-              _buildNavItem(
-                icon: Icons.map_outlined,
-                label: 'Districts',
-                isActive: currentPath == '/districts',
-                onTap: () => context.go('/districts'),
-              ),
-              _buildNavItem(
-                icon: Icons.notifications_outlined,
-                label: 'Alerts',
-                isActive: currentPath == '/alerts',
-                onTap: () => context.go('/alerts'),
-              ),
-              _buildNavItem(
-                icon: Icons.person_outline,
-                label: 'Profile',
-                isActive: currentPath == '/profile',
-                onTap: () => context.go('/profile'),
-              ),
+                  Icons.person, 'Profile', false, () => context.go('/profile')),
             ],
           ),
         ),
@@ -568,168 +806,161 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildNavItem({
-    required IconData icon,
-    required String label,
-    required bool isActive,
-    required VoidCallback onTap,
-  }) {
+  Widget _buildNavItem(IconData icon, String label, bool isActive,
+      [VoidCallback? onTap]) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: onTap ?? () {},
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            color: isActive ? AppColors.primary : const Color(0xFF6B7280),
-            size: 24,
-          ),
+          Icon(icon, color: isActive ? Colors.black87 : Colors.grey, size: 24),
           const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: isActive ? AppColors.primary : const Color(0xFF6B7280),
-            ),
-          ),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 12,
+                  color: isActive ? Colors.black87 : Colors.grey,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.normal)),
         ],
       ),
     );
   }
+}
 
-  void _showReportModal(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: const EdgeInsets.all(24),
+enum PowerStatus { on, off, unknown }
+
+class VoteData {
+  final PowerStatus status;
+  final DateTime timestamp;
+
+  VoteData({required this.status, required this.timestamp});
+}
+
+class SetHomeAreaDialog extends StatefulWidget {
+  final String? currentArea;
+
+  const SetHomeAreaDialog({super.key, this.currentArea});
+
+  @override
+  State<SetHomeAreaDialog> createState() => _SetHomeAreaDialogState();
+}
+
+class _SetHomeAreaDialogState extends State<SetHomeAreaDialog> {
+  final _controller = TextEditingController();
+  List<OSMPlace> _results = [];
+  bool _searching = false;
+  String? _errorMessage;
+  Timer? _debounceTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.currentArea != null) {
+      _controller.text = widget.currentArea!;
+    }
+  }
+
+  Future<void> _search(String query) async {
+    if (query.length < 3) {
+      setState(() {
+        _results = [];
+        _errorMessage = null;
+      });
+      return;
+    }
+    setState(() {
+      _searching = true;
+      _errorMessage = null;
+    });
+
+    debugPrint('Searching for: $query');
+
+    try {
+      final results =
+          await OpenStreetMapService.searchPlace(query, countryCode: 'gh');
+
+      debugPrint('Search results: ${results.length} found');
+
+      if (mounted) {
+        setState(() {
+          _results = results;
+          _searching = false;
+          if (results.isEmpty) {
+            _errorMessage = 'No areas found. Try: Accra, Kumasi, Takoradi';
+          }
+        });
+      }
+    } catch (e, stackTrace) {
+      debugPrint('Search error: $e');
+      debugPrint('Stack: $stackTrace');
+      if (mounted) {
+        setState(() {
+          _searching = false;
+          _errorMessage = 'Error: $e';
+        });
+      }
+    }
+  }
+
+  void _onSearchChanged(String value) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      _search(value);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(
+          widget.currentArea == null ? 'Set Home Area' : 'Change Home Area'),
+      content: SizedBox(
+        width: double.maxFinite,
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Report Power Status',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
+            TextField(
+              controller: _controller,
+              decoration: const InputDecoration(
+                hintText: 'Search area (e.g., Cantonments)',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
               ),
+              onChanged: _onSearchChanged,
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Help your community by reporting power outages or restorations',
-              style: TextStyle(
-                fontSize: 14,
-                color: AppColors.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () {
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Outage reported!')),
-                      );
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEE2E2),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFFFCA5A5)),
-                      ),
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.flash_off,
-                            color: AppColors.outageRed,
-                            size: 32,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Report Outage',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.outageRed,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () {
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Restoration reported!')),
-                      );
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFDCFCE7),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFF86EFAC)),
-                      ),
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.flash_on,
-                            color: AppColors.restoredGreen,
-                            size: 32,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Power Restored',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.restoredGreen,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            GestureDetector(
-              onTap: () => Navigator.pop(context),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceVariant,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Text(
-                  'Cancel',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF374151),
+            const SizedBox(height: 12),
+            if (_searching)
+              const CircularProgressIndicator()
+            else if (_errorMessage != null)
+              Text(_errorMessage!,
+                  style: TextStyle(color: Colors.red.shade600, fontSize: 12))
+            else if (_results.isNotEmpty)
+              SizedBox(
+                height: 200,
+                child: ListView.builder(
+                  itemCount: _results.length,
+                  itemBuilder: (ctx, i) => ListTile(
+                    title: Text(_results[i].shortName),
+                    subtitle: Text(_results[i].areaContext,
+                        style: const TextStyle(fontSize: 11)),
+                    onTap: () => Navigator.pop(context, _results[i].shortName),
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ],
     );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 }

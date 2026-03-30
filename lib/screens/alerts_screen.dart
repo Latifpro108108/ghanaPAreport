@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import '../constants/app_constants.dart';
 import '../models/alert.dart';
 
@@ -63,6 +64,10 @@ class _AlertsScreenState extends State<AlertsScreen>
       appBar: AppBar(
         title: const Text('Notifications'),
         centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.go('/home'),
+        ),
         bottom: TabBar(
           controller: _tabController,
           tabs: const [

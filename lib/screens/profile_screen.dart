@@ -12,7 +12,9 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  // Mock user data - matching React currentUser
+  String? _homeAreaName;
+
+  // Mock user data
   final Map<String, dynamic> _currentUser = {
     'name': 'Kwame Asante',
     'phone': '+233 50 123 4567',
@@ -21,6 +23,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'reportsSubmitted': 5,
     'helpfulVotes': 12,
   };
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHomeArea();
+  }
+
+  void _loadHomeArea() {
+    final storage = context.read<StorageService>();
+    setState(() {
+      _homeAreaName = storage.getHomeAreaName();
+    });
+  }
 
   Future<void> _handleLogout() async {
     await context.read<StorageService>().logout();
@@ -34,45 +49,54 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF9FAFB), // gray-50
+      backgroundColor: const Color(0xFFF5F5F5),
       body: Column(
         children: [
-          // Header - Gradient matching React
+          // Ghana-themed Header
           Container(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  Color(0xFF2563EB),
-                  Color(0xFF1E40AF)
-                ], // blue-600 to blue-800
+                  AppColors.ghanaGold,
+                  const Color(0xFFE6B800),
+                ],
               ),
             ),
-            padding: const EdgeInsets.fromLTRB(16, 40, 16, 48),
+            padding: const EdgeInsets.fromLTRB(16, 50, 16, 40),
             child: Column(
               children: [
+                // Back button
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.black87),
+                    onPressed: () => context.go('/'),
+                  ),
+                ),
                 // Avatar
                 Container(
                   width: 80,
                   height: 80,
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
+                    color: Colors.white.withOpacity(0.3),
                     shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 3),
                   ),
                   child: const Icon(
                     Icons.person,
                     size: 40,
-                    color: Colors.white,
+                    color: Colors.black87,
                   ),
                 ),
                 const SizedBox(height: 12),
                 Text(
                   _currentUser['name'],
                   style: const TextStyle(
-                    fontSize: 20,
+                    fontSize: 22,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: Colors.black87,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -80,9 +104,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _currentUser['phone'],
                   style: TextStyle(
                     fontSize: 14,
-                    color: Colors.blue.shade100,
+                    color: Colors.black.withOpacity(0.7),
                   ),
                 ),
+                if (_homeAreaName != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.home, size: 14, color: Colors.black87),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Home: $_homeAreaName',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.black87,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -92,207 +142,83 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: SingleChildScrollView(
               padding: const EdgeInsets.only(bottom: 100),
               child: Transform.translate(
-                offset: const Offset(0, -24), // Overlap header
+                offset: const Offset(0, -20),
                 child: Column(
                   children: [
-                    // Stats Card - matching React exactly
+                    // Stats Card
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFFE5E7EB)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
                       ),
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(20),
                       child: Row(
                         children: [
-                          Expanded(
-                            child: Column(
-                              children: [
-                                Text(
-                                  _currentUser['reportsSubmitted'].toString(),
-                                  style: const TextStyle(
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF2563EB),
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                const Text(
-                                  'Reports',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xFF6B7280),
-                                  ),
-                                ),
-                              ],
-                            ),
+                          _buildStat(
+                            _currentUser['reportsSubmitted'].toString(),
+                            'Reports',
+                            const Color(0xFF4CAF50),
                           ),
                           Container(
                             width: 1,
                             height: 40,
-                            color: const Color(0xFFE5E7EB),
+                            color: Colors.grey.shade200,
                           ),
-                          Expanded(
-                            child: Column(
-                              children: [
-                                Text(
-                                  _currentUser['helpfulVotes'].toString(),
-                                  style: const TextStyle(
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF059669),
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                const Text(
-                                  'Helpful Votes',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xFF6B7280),
-                                  ),
-                                ),
-                              ],
-                            ),
+                          _buildStat(
+                            _currentUser['helpfulVotes'].toString(),
+                            'Helpful',
+                            const Color(0xFF006B3F),
                           ),
                           Container(
                             width: 1,
                             height: 40,
-                            color: const Color(0xFFE5E7EB),
+                            color: Colors.grey.shade200,
                           ),
-                          const Expanded(
-                            child: Column(
-                              children: [
-                                Text(
-                                  '3',
-                                  style: TextStyle(
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF7C3AED),
-                                  ),
-                                ),
-                                SizedBox(height: 4),
-                                Text(
-                                  'Districts',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xFF6B7280),
-                                  ),
-                                ),
-                              ],
-                            ),
+                          _buildStat(
+                            '3',
+                            'Areas',
+                            AppColors.ghanaGold,
                           ),
                         ],
                       ),
                     ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 20),
 
-                    // Account Information - matching React
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Padding(
-                            padding: EdgeInsets.only(left: 8, bottom: 8),
-                            child: Text(
-                              'Account Information',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF6B7280),
-                              ),
-                            ),
-                          ),
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border:
-                                  Border.all(color: const Color(0xFFE5E7EB)),
-                            ),
-                            child: Column(
-                              children: [
-                                _buildInfoRow(
-                                  icon: Icons.phone,
-                                  label: 'Phone',
-                                  value: _currentUser['phone'],
-                                ),
-                                const Divider(height: 1, indent: 56),
-                                _buildInfoRow(
-                                  icon: Icons.email,
-                                  label: 'Email',
-                                  value: _currentUser['email'],
-                                ),
-                                const Divider(height: 1, indent: 56),
-                                _buildInfoRow(
-                                  icon: Icons.calendar_today,
-                                  label: 'Member Since',
-                                  value: _currentUser['joinedDate'],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    // Account Section
+                    _buildSection('Account Information', [
+                      _buildInfoTile(
+                          Icons.phone, 'Phone', _currentUser['phone']),
+                      _buildInfoTile(
+                          Icons.email, 'Email', _currentUser['email']),
+                      _buildInfoTile(Icons.calendar_today, 'Member Since',
+                          _currentUser['joinedDate']),
+                    ]),
 
                     const SizedBox(height: 16),
 
-                    // Settings Menu - matching React
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Padding(
-                            padding: EdgeInsets.only(left: 8, bottom: 8),
-                            child: Text(
-                              'Settings',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF6B7280),
-                              ),
-                            ),
-                          ),
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border:
-                                  Border.all(color: const Color(0xFFE5E7EB)),
-                            ),
-                            child: Column(
-                              children: [
-                                _buildMenuRow(
-                                  icon: Icons.description,
-                                  label: 'My Reports',
-                                  onTap: () {},
-                                ),
-                                const Divider(height: 1, indent: 56),
-                                _buildMenuRow(
-                                  icon: Icons.shield,
-                                  label: 'Privacy & Security',
-                                  onTap: () {},
-                                ),
-                                const Divider(height: 1, indent: 56),
-                                _buildMenuRow(
-                                  icon: Icons.help,
-                                  label: 'Help & Support',
-                                  onTap: () {},
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    // Settings Section
+                    _buildSection('Settings', [
+                      _buildActionTile(Icons.description, 'My Reports', () {}),
+                      _buildActionTile(
+                          Icons.notifications, 'Notification Settings', () {}),
+                      _buildActionTile(
+                          Icons.shield, 'Privacy & Security', () {}),
+                      _buildActionTile(
+                          Icons.help_outline, 'Help & Support', () {}),
+                    ]),
 
                     const SizedBox(height: 16),
 
-                    // Logout Button - matching React
+                    // Logout Button
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: GestureDetector(
@@ -301,25 +227,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           width: double.infinity,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFEF2F2), // red-50
+                            color: const Color(0xFFFFEBEE),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFFEE2E2)),
+                            border: Border.all(
+                                color:
+                                    const Color(0xFFE53935).withOpacity(0.3)),
                           ),
                           child: const Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(
-                                Icons.logout,
-                                size: 20,
-                                color: Color(0xFFDC2626),
-                              ),
+                              Icon(Icons.logout,
+                                  size: 20, color: Color(0xFFE53935)),
                               SizedBox(width: 8),
                               Text(
                                 'Logout',
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w600,
-                                  color: Color(0xFFDC2626),
+                                  color: Color(0xFFE53935),
                                 ),
                               ),
                             ],
@@ -327,6 +252,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                     ),
+
+                    const SizedBox(height: 30),
                   ],
                 ),
               ),
@@ -338,16 +265,86 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildInfoRow({
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
+  Widget _buildStat(String value, String label, Color color) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSection(String title, List<Widget> children) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 8),
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              children: _addDividers(children),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _addDividers(List<Widget> children) {
+    final result = <Widget>[];
+    for (int i = 0; i < children.length; i++) {
+      result.add(children[i]);
+      if (i < children.length - 1) {
+        result.add(Divider(height: 1, indent: 56, color: Colors.grey.shade200));
+      }
+    }
+    return result;
+  }
+
+  Widget _buildInfoTile(IconData icon, String label, String value) {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Row(
         children: [
-          Icon(icon, size: 20, color: const Color(0xFF9CA3AF)),
+          Icon(icon, size: 20, color: Colors.grey.shade500),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
@@ -355,18 +352,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
               children: [
                 Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF6B7280),
+                    color: Colors.grey.shade500,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   value,
                   style: const TextStyle(
-                    fontSize: 14,
+                    fontSize: 15,
                     fontWeight: FontWeight.w500,
-                    color: Color(0xFF111827),
+                    color: Colors.black87,
                   ),
                 ),
               ],
@@ -377,11 +374,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildMenuRow({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
+  Widget _buildActionTile(IconData icon, String label, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.translucent,
@@ -389,23 +382,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: const Color(0xFF9CA3AF)),
+            Icon(icon, size: 20, color: Colors.grey.shade500),
             const SizedBox(width: 16),
             Expanded(
               child: Text(
                 label,
                 style: const TextStyle(
-                  fontSize: 14,
+                  fontSize: 15,
                   fontWeight: FontWeight.w500,
-                  color: Color(0xFF111827),
+                  color: Colors.black87,
                 ),
               ),
             ),
-            const Icon(
-              Icons.chevron_right,
-              size: 20,
-              color: Color(0xFF9CA3AF),
-            ),
+            Icon(Icons.chevron_right, size: 20, color: Colors.grey.shade400),
           ],
         ),
       ),
@@ -416,11 +405,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final currentPath = GoRouterState.of(context).uri.path;
 
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(
-          top: BorderSide(color: Color(0xFFE5E7EB)),
-        ),
+        border: Border(top: BorderSide(color: Colors.grey.shade300)),
       ),
       child: SafeArea(
         top: false,
@@ -436,19 +423,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onTap: () => context.go('/home'),
               ),
               _buildNavItem(
-                icon: Icons.map_outlined,
-                label: 'Districts',
-                isActive: currentPath == '/districts',
-                onTap: () => context.go('/districts'),
-              ),
-              _buildNavItem(
                 icon: Icons.notifications_outlined,
                 label: 'Alerts',
                 isActive: currentPath == '/alerts',
                 onTap: () => context.go('/alerts'),
               ),
               _buildNavItem(
-                icon: Icons.person_outline,
+                icon: Icons.campaign_outlined,
+                label: 'News',
+                isActive: currentPath == '/announcements',
+                onTap: () => context.go('/announcements'),
+              ),
+              _buildNavItem(
+                icon: Icons.person,
                 label: 'Profile',
                 isActive: currentPath == '/profile',
                 onTap: () {},
@@ -473,7 +460,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         children: [
           Icon(
             icon,
-            color: isActive ? AppColors.primary : const Color(0xFF6B7280),
+            color: isActive ? Colors.black87 : Colors.grey,
             size: 24,
           ),
           const SizedBox(height: 4),
@@ -482,7 +469,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w500,
-              color: isActive ? AppColors.primary : const Color(0xFF6B7280),
+              color: isActive ? Colors.black87 : Colors.grey,
             ),
           ),
         ],

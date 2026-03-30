@@ -1,35 +1,48 @@
 import 'package:flutter/material.dart';
 
 class AppColors {
-  // Primary Colors - Blue theme
-  static const Color primary = Color(0xFF2563EB); // Blue 600
-  static const Color primaryDark = Color(0xFF1E40AF); // Blue 800
-  static const Color primaryLight = Color(0xFFEFF6FF); // Blue 50
+  // Ghana Flag Colors
+  static const Color ghanaRed = Color(0xFFCE1126); // Red from flag
+  static const Color ghanaGold = Color(0xFFFCD116); // Gold/Yellow from flag
+  static const Color ghanaGreen = Color(0xFF006B3F); // Green from flag
+  static const Color ghanaBlack = Color(0xFF000000); // Black star
 
-  // Secondary Colors - Green
-  static const Color secondary = Color(0xFF10B981);
-  static const Color secondaryLight = Color(0xFFDCFCE7);
+  // Primary - Ghana Gold (main brand color)
+  static const Color primary = Color(0xFFFCD116);
+  static const Color primaryDark = Color(0xFFE5BC14);
+  static const Color primaryLight = Color(0xFFFFF9E6);
 
-  // Status Colors
-  static const Color success = Color(0xFF10B981); // Green
-  static const Color warning = Color(0xFFF59E0B); // Amber
-  static const Color error = Color(0xFFEF4444); // Red
-  static const Color info = Color(0xFF3B82F6); // Blue
+  // Secondary - Ghana Green
+  static const Color secondary = Color(0xFF006B3F);
+  static const Color secondaryLight = Color(0xFFE6F4EF);
+
+  // Power Status Colors
+  static const Color powerOn = Color(0xFF006B3F); // Ghana Green = Power ON
+  static const Color powerOff = Color(0xFFCE1126); // Ghana Red = Power OFF
+  static const Color powerUnknown = Color(0xFF9CA3AF); // Gray = Unknown
+
+  // Accent - Ghana Red (for warnings/outages)
+  static const Color accent = Color(0xFFCE1126);
+  static const Color accentLight = Color(0xFFFEE2E2);
 
   // Neutral Colors
-  static const Color background = Color(0xFFFAFAFA); // Gray 50
-  static const Color surface = Color(0xFFFFFFFF); // White
-  static const Color surfaceVariant = Color(0xFFF3F4F6); // Gray 100
-  static const Color outlineVariant = Color(0xFFE5E7EB); // Gray 200
-  static const Color outline = Color(0xFF9CA3AF); // Gray 400
-  static const Color onSurface = Color(0xFF111827); // Gray 900
-  static const Color onSurfaceVariant = Color(0xFF6B7280); // Gray 500
+  static const Color background = Color(0xFFFAFAFA);
+  static const Color surface = Color(0xFFFFFFFF);
+  static const Color surfaceVariant = Color(0xFFF3F4F6);
+  static const Color outlineVariant = Color(0xFFE5E7EB);
+  static const Color outline = Color(0xFF9CA3AF);
+  static const Color onSurface = Color(0xFF111827);
+  static const Color onSurfaceVariant = Color(0xFF6B7280);
 
-  // Status-specific colors
-  static const Color outageRed = Color(0xFFDC2626); // Red 600
-  static const Color outageRedLight = Color(0xFFFEE2E2); // Red 100
-  static const Color restoredGreen = Color(0xFF059669); // Green 600
-  static const Color restoredGreenLight = Color(0xFFD1FAE5); // Green 100
+  // Legacy compatibility
+  static const Color success = Color(0xFF006B3F);
+  static const Color warning = Color(0xFFF59E0B);
+  static const Color error = Color(0xFFCE1126);
+  static const Color info = Color(0xFF2563EB);
+  static const Color outageRed = Color(0xFFCE1126);
+  static const Color outageRedLight = Color(0xFFFEE2E2);
+  static const Color restoredGreen = Color(0xFF006B3F);
+  static const Color restoredGreenLight = Color(0xFFD1FAE5);
 }
 
 class AppSpacing {

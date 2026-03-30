@@ -99,4 +99,23 @@ class StorageService {
     await _prefs.remove('userPhone');
     await _prefs.remove('userEmail');
   }
+
+  // Home Area - where user lives
+  Future<void> saveHomeArea(String areaName, double lat, double lon) async {
+    await _prefs.setString('homeAreaName', areaName);
+    await _prefs.setDouble('homeAreaLat', lat);
+    await _prefs.setDouble('homeAreaLon', lon);
+  }
+
+  String? getHomeAreaName() => _prefs.getString('homeAreaName');
+  double? getHomeAreaLat() => _prefs.getDouble('homeAreaLat');
+  double? getHomeAreaLon() => _prefs.getDouble('homeAreaLon');
+
+  bool hasHomeArea() => _prefs.getString('homeAreaName') != null;
+
+  Future<void> clearHomeArea() async {
+    await _prefs.remove('homeAreaName');
+    await _prefs.remove('homeAreaLat');
+    await _prefs.remove('homeAreaLon');
+  }
 }
