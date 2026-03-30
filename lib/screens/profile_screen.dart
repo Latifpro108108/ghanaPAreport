@@ -72,7 +72,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   alignment: Alignment.centerLeft,
                   child: IconButton(
                     icon: const Icon(Icons.arrow_back, color: Colors.black87),
-                    onPressed: () => context.go('/'),
+                    onPressed: () => context.go('/home'),
                   ),
                 ),
                 // Avatar

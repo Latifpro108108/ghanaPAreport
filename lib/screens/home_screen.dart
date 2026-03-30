@@ -82,6 +82,93 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _removeLastVote(String areaId) {
+    setState(() {
+      if (_areaVotes.containsKey(areaId) && _areaVotes[areaId]!.isNotEmpty) {
+        _areaVotes[areaId]!.removeLast();
+        if (_areaVotes[areaId]!.isEmpty) {
+          _areaVotes.remove(areaId);
+        }
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Your last vote has been removed')),
+    );
+  }
+
+  void _setCurrentLocationAsHome() async {
+    if (_currentAreaName == 'Detecting...' ||
+        _currentAreaName == 'Location unavailable') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Please wait for location to be detected')),
+      );
+      return;
+    }
+    final storage = context.read<StorageService>();
+    await storage.saveHomeArea(_currentAreaName, 0, 0);
+    setState(() {
+      _homeAreaName = _currentAreaName;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Home area set to: $_currentAreaName')),
+    );
+  }
+
+  void _showHomeAreaOptions() async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Set Home Area'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!_isLoadingLocation &&
+                _currentAreaName != 'Location unavailable')
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.ghanaGold.withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.my_location, color: Colors.black87),
+                ),
+                title: const Text('Use Current Location'),
+                subtitle: Text(_currentAreaName),
+                onTap: () => Navigator.pop(context, 'current'),
+              ),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade200,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.search, color: Colors.black54),
+              ),
+              title: const Text('Search for Area'),
+              subtitle: const Text('Find a specific neighborhood or area'),
+              onTap: () => Navigator.pop(context, 'search'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == 'current') {
+      _setCurrentLocationAsHome();
+    } else if (result == 'search') {
+      _setOrChangeHomeArea();
+    }
+  }
+
   void _setOrChangeHomeArea() async {
     final result = await showDialog<String>(
       context: context,
@@ -195,7 +282,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
               // Current Location Card with voting
               _buildSectionTitle('Where I Am Now'),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               _buildCurrentLocationCard(currentAreaId, isAtHome),
               const SizedBox(height: 20),
 
@@ -489,7 +576,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 12),
           // Change Home Area button
           GestureDetector(
-            onTap: _setOrChangeHomeArea,
+            onTap: _showHomeAreaOptions,
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
               decoration: BoxDecoration(
@@ -515,7 +602,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildSetHomeAreaPrompt() {
     return GestureDetector(
-      onTap: _setOrChangeHomeArea,
+      onTap: _showHomeAreaOptions,
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -542,118 +629,121 @@ class _HomeScreenState extends State<HomeScreen> {
     final recentVotes = _getRecentVotes(areaId);
     final lastReport = recentVotes.isNotEmpty ? recentVotes.first : null;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_isLoadingLocation)
-            const Row(
-              children: [
-                SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2)),
-                SizedBox(width: 8),
-                Text('Finding your location...'),
-              ],
-            )
-          else
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_currentAreaName,
-                        style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w600)),
-                    if (_currentAreaContext != null)
-                      Text(_currentAreaContext!,
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade600)),
-                  ],
-                ),
-                _buildStatusBadge(status),
-              ],
-            ),
-          if (!_isLoadingLocation) ...[
-            if (lastReport != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  'Last report: ${_getTimeAgo(lastReport.timestamp)}',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                ),
+    return GestureDetector(
+      onTap: _homeAreaName == null ? _setCurrentLocationAsHome : null,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade300),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_isLoadingLocation)
+              const Row(
+                children: [
+                  SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
+                  SizedBox(width: 8),
+                  Text('Finding your location...'),
+                ],
+              )
+            else
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_currentAreaName,
+                          style: const TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w600)),
+                      if (_currentAreaContext != null)
+                        Text(_currentAreaContext!,
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey.shade600)),
+                    ],
+                  ),
+                  _buildStatusBadge(status),
+                ],
               ),
-            const SizedBox(height: 12),
-            const Divider(),
-            const SizedBox(height: 8),
-            const Text('Report current power status:',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => _votePowerStatus(areaId, PowerStatus.on),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE8F5E9),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFF4CAF50)),
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.flash_on,
-                              color: Color(0xFF4CAF50), size: 18),
-                          SizedBox(width: 4),
-                          Text('Power ON',
-                              style: TextStyle(
-                                  color: Color(0xFF4CAF50),
-                                  fontWeight: FontWeight.w600)),
-                        ],
+            if (!_isLoadingLocation) ...[
+              if (lastReport != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Last report: ${_getTimeAgo(lastReport.timestamp)}',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              const Divider(),
+              const SizedBox(height: 8),
+              const Text('Report current power status:',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => _votePowerStatus(areaId, PowerStatus.on),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE8F5E9),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFF4CAF50)),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.flash_on,
+                                color: Color(0xFF4CAF50), size: 18),
+                            SizedBox(width: 4),
+                            Text('Power ON',
+                                style: TextStyle(
+                                    color: Color(0xFF4CAF50),
+                                    fontWeight: FontWeight.w600)),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => _votePowerStatus(areaId, PowerStatus.off),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFEBEE),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFE53935)),
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.flash_off,
-                              color: Color(0xFFE53935), size: 18),
-                          SizedBox(width: 4),
-                          Text('No Power',
-                              style: TextStyle(
-                                  color: Color(0xFFE53935),
-                                  fontWeight: FontWeight.w600)),
-                        ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => _votePowerStatus(areaId, PowerStatus.off),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFEBEE),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFE53935)),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.flash_off,
+                                color: Color(0xFFE53935), size: 18),
+                            SizedBox(width: 4),
+                            Text('No Power',
+                                style: TextStyle(
+                                    color: Color(0xFFE53935),
+                                    fontWeight: FontWeight.w600)),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
