@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "966352063414",
+    "firebase_url": "https://ghanapower-95aac-default-rtdb.firebaseio.com",
+    "project_id": "ghanapower-95aac",
+    "storage_bucket": "ghanapower-95aac.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:966352063414:android:f0c04d6ef8dbe8a05d0f17",
+        "android_client_info": {
+          "package_name": "com.poweralert.poweralert_gh_flutter"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "966352063414-pf1qm1q34t1urocm1drif5ffokrg9s4p.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyClvdtzUbZEHi_L1-tlY4zFhsQ0cqRQohw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "966352063414-pf1qm1q34t1urocm1drif5ffokrg9s4p.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

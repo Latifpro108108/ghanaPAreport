@@ -3,10 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../constants/app_constants.dart';
 import '../services/storage_service.dart';
 import '../services/location_service.dart';
 import '../services/openstreetmap_service.dart';
+import '../services/firebase_vote_service.dart';
+import '../services/notification_service.dart';
+import '../models/firestore_models.dart';
 
 /// IMPROVED Home Screen - Time-based voting with visual comparison
 class HomeScreen extends StatefulWidget {
@@ -23,19 +27,102 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoadingLocation = true;
   StreamSubscription<Position>? _locationStream;
 
+  // Firebase services
+  final FirebaseVoteService _voteService = FirebaseVoteService();
+  final NotificationService _notificationService = NotificationService();
+
+  // Current user
+  User? _currentUser;
+  String? _currentAreaIdSubscribed;
+
   // Store votes with timestamps per area: areaId -> list of votes
   Map<String, List<VoteData>> _areaVotes = {};
+  StreamSubscription? _votesSubscription;
 
   @override
   void initState() {
     super.initState();
+    _initializeServices();
     _loadHomeArea();
     _startLocationTracking();
+    _startNotificationTimer();
+  }
+
+  Future<void> _initializeServices() async {
+    // Initialize notification service
+    await _notificationService.initialize();
+
+    // Get current user
+    _currentUser = FirebaseAuth.instance.currentUser;
+
+    // Listen to auth changes
+    FirebaseAuth.instance.authStateChanges().listen((user) {
+      setState(() => _currentUser = user);
+    });
+  }
+
+  void _startNotificationTimer() {
+    // Check every 30 minutes if power is back
+    Timer.periodic(const Duration(minutes: 30), (timer) {
+      _checkAndNotifyPowerStatus();
+    });
+  }
+
+  void _checkAndNotifyPowerStatus() {
+    final currentAreaId = _currentAreaName.toLowerCase().replaceAll(' ', '_');
+    final recentVotes = _getRecentVotes(currentAreaId);
+
+    // If user voted OFF in last 30 min, ask if power is back
+    final thirtyMinutesAgo =
+        DateTime.now().subtract(const Duration(minutes: 30));
+    final userRecentOffVote = recentVotes.any((v) =>
+        v.status == PowerStatus.off && v.timestamp.isAfter(thirtyMinutesAgo));
+
+    if (userRecentOffVote) {
+      _showPowerBackNotification();
+    }
+  }
+
+  void _showPowerBackNotification() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Power Update?'),
+        content: const Text(
+            'You reported no power 30 minutes ago. Is the power back now?'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              final currentAreaId =
+                  _currentAreaName.toLowerCase().replaceAll(' ', '_');
+              _votePowerStatus(currentAreaId, PowerStatus.off);
+            },
+            child: const Text('Still No Power',
+                style: TextStyle(color: Colors.red)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              final currentAreaId =
+                  _currentAreaName.toLowerCase().replaceAll(' ', '_');
+              _votePowerStatus(currentAreaId, PowerStatus.on);
+            },
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF4CAF50)),
+            child: const Text('Power is Back!'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   void dispose() {
     _locationStream?.cancel();
+    _votesSubscription?.cancel();
+    _notificationService.dispose();
     super.dispose();
   }
 
@@ -50,6 +137,15 @@ class _HomeScreenState extends State<HomeScreen> {
     _updateCurrentLocation();
     _locationStream = LocationService.getLocationStream().listen((position) {
       _updateCurrentLocationFromPosition(position);
+    });
+  }
+
+  void _subscribeToAreaVotes(String areaId) {
+    _votesSubscription?.cancel();
+    _votesSubscription = _voteService.getRecentVotes(areaId).listen((votes) {
+      setState(() {
+        _areaVotes[areaId] = votes;
+      });
     });
   }
 
@@ -79,21 +175,12 @@ class _HomeScreenState extends State<HomeScreen> {
         _currentAreaContext = place.areaContext;
         _isLoadingLocation = false;
       });
+      // Subscribe to real-time votes for this area
+      final areaId = place.shortName.toLowerCase().replaceAll(' ', '_');
+      _subscribeToAreaVotes(areaId);
+      // Subscribe to area notifications
+      _notificationService.subscribeToArea(areaId);
     }
-  }
-
-  void _removeLastVote(String areaId) {
-    setState(() {
-      if (_areaVotes.containsKey(areaId) && _areaVotes[areaId]!.isNotEmpty) {
-        _areaVotes[areaId]!.removeLast();
-        if (_areaVotes[areaId]!.isEmpty) {
-          _areaVotes.remove(areaId);
-        }
-      }
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Your last vote has been removed')),
-    );
   }
 
   void _setCurrentLocationAsHome() async {
@@ -188,21 +275,121 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _votePowerStatus(String areaId, PowerStatus status) {
+  // Track if current user has voted in an area
+  Map<String, bool> _userHasVoted = {};
+
+  void _votePowerStatus(String areaId, PowerStatus status) async {
+    // Check if user already voted in this area
+    if (_userHasVoted[areaId] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('You already voted in this area. Remove your vote first.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
     final now = DateTime.now();
 
+    // Save to local state for immediate UI update
     setState(() {
       if (!_areaVotes.containsKey(areaId)) {
         _areaVotes[areaId] = [];
       }
       _areaVotes[areaId]!.add(VoteData(status: status, timestamp: now));
+      _userHasVoted[areaId] = true;
+    });
+
+    // Save to Firebase
+    await _voteService.submitVote(areaId, status, _currentUser?.uid);
+
+    // Subscribe to area notifications
+    await _notificationService.subscribeToArea(areaId);
+    _currentAreaIdSubscribed = areaId;
+
+    // Check for crowd detection
+    await _checkForCrowdAlert(areaId);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Thank you! Your report has been recorded.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _checkForCrowdAlert(String areaId) async {
+    // Get votes from local state for crowd detection
+    final recentVotes = _getRecentVotes(areaId);
+
+    // Only check if we have 3+ total votes in this area
+    if (recentVotes.length >= 3) {
+      final onCount =
+          recentVotes.where((v) => v.status == PowerStatus.on).length;
+      final offCount =
+          recentVotes.where((v) => v.status == PowerStatus.off).length;
+
+      // If 70% or more agree on one status
+      if (onCount >= recentVotes.length * 0.7) {
+        await _showCrowdNotification(
+            areaId, 'Power is likely ON', PowerStatus.on);
+      } else if (offCount >= recentVotes.length * 0.7) {
+        await _showCrowdNotification(
+            areaId, 'Power outage likely in this area', PowerStatus.off);
+      }
+    }
+  }
+
+  Future<void> _showCrowdNotification(
+      String areaId, String message, PowerStatus status) async {
+    // Show local notification
+    await _notificationService.showCrowdAlertNotification(
+      areaId,
+      _currentAreaName,
+      message,
+    );
+
+    // Show dialog for immediate feedback
+    if (mounted) {
+      _showCrowdAlert(areaId, message);
+    }
+  }
+
+  void _removeLastVote(String areaId) async {
+    // Remove from Firebase
+    await _voteService.removeLastVote(areaId, _currentUser?.uid);
+
+    // Remove from local state
+    setState(() {
+      if (_areaVotes.containsKey(areaId) && _areaVotes[areaId]!.isNotEmpty) {
+        _areaVotes[areaId]!.removeLast();
+        if (_areaVotes[areaId]!.isEmpty) {
+          _areaVotes.remove(areaId);
+        }
+      }
+      _userHasVoted[areaId] = false;
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content:
-            Text('Thank you! Your report has been recorded with timestamp.'),
-        duration: Duration(seconds: 2),
+          content: Text('Your vote has been removed. You can now vote again.')),
+    );
+  }
+
+  void _showCrowdAlert(String areaId, String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Community Alert'),
+        content: Text('Many users are reporting: $message'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }
@@ -285,14 +472,6 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 10),
               _buildCurrentLocationCard(currentAreaId, isAtHome),
               const SizedBox(height: 20),
-
-              // Recent Reports Timeline
-              if (_areaVotes[currentAreaId]?.isNotEmpty == true) ...[
-                _buildSectionTitle('Recent Reports Here'),
-                const SizedBox(height: 8),
-                _buildReportsTimeline(currentAreaId),
-                const SizedBox(height: 20),
-              ],
 
               // ECG News
               _buildSectionTitle('ECG News'),
@@ -686,61 +865,112 @@ class _HomeScreenState extends State<HomeScreen> {
               const Text('Report current power status:',
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
               const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => _votePowerStatus(areaId, PowerStatus.on),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE8F5E9),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFF4CAF50)),
+              // Show voting buttons OR already voted message
+              if (_userHasVoted[areaId] == true) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE3F2FD),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF2196F3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.check_circle,
+                          color: Color(0xFF2196F3), size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'You have already voted in this area',
+                          style: TextStyle(
+                            color: const Color(0xFF1976D2),
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                        child: const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.flash_on,
-                                color: Color(0xFF4CAF50), size: 18),
-                            SizedBox(width: 4),
-                            Text('Power ON',
-                                style: TextStyle(
-                                    color: Color(0xFF4CAF50),
-                                    fontWeight: FontWeight.w600)),
-                          ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                GestureDetector(
+                  onTap: () => _removeLastVote(areaId),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.undo, size: 16, color: Colors.black54),
+                        SizedBox(width: 4),
+                        Text('Remove my vote to vote again',
+                            style:
+                                TextStyle(fontSize: 12, color: Colors.black54)),
+                      ],
+                    ),
+                  ),
+                ),
+              ] else ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => _votePowerStatus(areaId, PowerStatus.on),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F5E9),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF4CAF50)),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.flash_on,
+                                  color: Color(0xFF4CAF50), size: 18),
+                              SizedBox(width: 4),
+                              Text('Power ON',
+                                  style: TextStyle(
+                                      color: Color(0xFF4CAF50),
+                                      fontWeight: FontWeight.w600)),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => _votePowerStatus(areaId, PowerStatus.off),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFEBEE),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFFE53935)),
-                        ),
-                        child: const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.flash_off,
-                                color: Color(0xFFE53935), size: 18),
-                            SizedBox(width: 4),
-                            Text('No Power',
-                                style: TextStyle(
-                                    color: Color(0xFFE53935),
-                                    fontWeight: FontWeight.w600)),
-                          ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => _votePowerStatus(areaId, PowerStatus.off),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFEBEE),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFE53935)),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.flash_off,
+                                  color: Color(0xFFE53935), size: 18),
+                              SizedBox(width: 4),
+                              Text('No Power',
+                                  style: TextStyle(
+                                      color: Color(0xFFE53935),
+                                      fontWeight: FontWeight.w600)),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
+              ],
             ],
           ],
         ),

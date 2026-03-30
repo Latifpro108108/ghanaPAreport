@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../constants/app_constants.dart';
 import '../services/storage_service.dart';
+import '../services/firebase_auth_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -13,27 +15,29 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   String? _homeAreaName;
-
-  // Mock user data
-  final Map<String, dynamic> _currentUser = {
-    'name': 'Kwame Asante',
-    'phone': '+233 50 123 4567',
-    'email': 'kwame.asante@example.com',
-    'joinedDate': 'January 2024',
-    'reportsSubmitted': 5,
-    'helpfulVotes': 12,
-  };
+  User? _firebaseUser;
+  final FirebaseAuthService _authService = FirebaseAuthService();
 
   @override
   void initState() {
     super.initState();
     _loadHomeArea();
+    _loadUser();
   }
 
   void _loadHomeArea() {
     final storage = context.read<StorageService>();
     setState(() {
       _homeAreaName = storage.getHomeAreaName();
+    });
+  }
+
+  void _loadUser() {
+    _firebaseUser = FirebaseAuth.instance.currentUser;
+    FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (mounted) {
+        setState(() => _firebaseUser = user);
+      }
     });
   }
 
@@ -92,7 +96,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  _currentUser['name'],
+                  _firebaseUser?.displayName ?? 'Guest',
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
@@ -101,10 +105,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  _currentUser['phone'],
+                  _firebaseUser?.email ?? '',
                   style: TextStyle(
                     fontSize: 14,
                     color: Colors.black.withOpacity(0.7),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _firebaseUser?.phoneNumber ?? '',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.black.withOpacity(0.6),
                   ),
                 ),
                 if (_homeAreaName != null) ...[
@@ -145,75 +157,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 offset: const Offset(0, -20),
                 child: Column(
                   children: [
-                    // Stats Card
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 10,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      padding: const EdgeInsets.all(20),
-                      child: Row(
-                        children: [
-                          _buildStat(
-                            _currentUser['reportsSubmitted'].toString(),
-                            'Reports',
-                            const Color(0xFF4CAF50),
-                          ),
-                          Container(
-                            width: 1,
-                            height: 40,
-                            color: Colors.grey.shade200,
-                          ),
-                          _buildStat(
-                            _currentUser['helpfulVotes'].toString(),
-                            'Helpful',
-                            const Color(0xFF006B3F),
-                          ),
-                          Container(
-                            width: 1,
-                            height: 40,
-                            color: Colors.grey.shade200,
-                          ),
-                          _buildStat(
-                            '3',
-                            'Areas',
-                            AppColors.ghanaGold,
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 20),
-
                     // Account Section
                     _buildSection('Account Information', [
-                      _buildInfoTile(
-                          Icons.phone, 'Phone', _currentUser['phone']),
-                      _buildInfoTile(
-                          Icons.email, 'Email', _currentUser['email']),
-                      _buildInfoTile(Icons.calendar_today, 'Member Since',
-                          _currentUser['joinedDate']),
+                      _buildInfoTile(Icons.phone, 'Phone',
+                          _firebaseUser?.phoneNumber ?? 'Not set'),
+                      _buildInfoTile(Icons.email, 'Email',
+                          _firebaseUser?.email ?? 'Not set'),
                     ]),
 
                     const SizedBox(height: 16),
 
                     // Settings Section
                     _buildSection('Settings', [
-                      _buildActionTile(Icons.description, 'My Reports', () {}),
                       _buildActionTile(
                           Icons.notifications, 'Notification Settings', () {}),
                       _buildActionTile(
                           Icons.shield, 'Privacy & Security', () {}),
-                      _buildActionTile(
-                          Icons.help_outline, 'Help & Support', () {}),
                     ]),
 
                     const SizedBox(height: 16),

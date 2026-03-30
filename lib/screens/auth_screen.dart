@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import '../constants/app_constants.dart';
 import 'package:provider/provider.dart';
+import '../constants/app_constants.dart';
 import '../services/storage_service.dart';
+import '../services/firebase_auth_service.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({Key? key}) : super(key: key);
@@ -18,6 +19,7 @@ class _AuthScreenState extends State<AuthScreen> {
   late TextEditingController _passwordController;
   bool _isLogin = true;
   bool _isLoading = false;
+  final FirebaseAuthService _authService = FirebaseAuthService();
 
   @override
   void initState() {
@@ -56,38 +58,79 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   void _handleLogin() async {
+    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+      _showMessage('Please enter email and password');
+      return;
+    }
+
     setState(() => _isLoading = true);
 
-    await Future.delayed(const Duration(milliseconds: 500));
+    try {
+      final user = await _authService.signInWithEmail(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    final storageService = context.read<StorageService>();
-    await storageService.setAuthenticated(true);
-    await storageService.saveToken('mock_token_123');
+      if (user != null) {
+        final storageService = context.read<StorageService>();
+        await storageService.setAuthenticated(true);
+        await storageService.saveToken(user.uid);
+        await storageService.saveUserName(user.displayName ?? '');
+        await storageService.saveUserEmail(user.email ?? '');
+        await storageService.saveUserPhone(user.phoneNumber ?? '');
 
-    if (mounted) {
-      context.go('/home');
+        context.go('/home');
+      } else {
+        _showMessage('Login failed. Please check your credentials.');
+      }
+    } catch (e) {
+      _showMessage('Error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _handleRegister() async {
+    if (_emailController.text.isEmpty ||
+        _passwordController.text.isEmpty ||
+        _nameController.text.isEmpty) {
+      _showMessage('Please fill all required fields');
+      return;
+    }
+
     setState(() => _isLoading = true);
 
-    await Future.delayed(const Duration(milliseconds: 500));
+    try {
+      final user = await _authService.registerWithEmail(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+        displayName: _nameController.text.trim(),
+        phoneNumber: _phoneController.text.trim(),
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    final storageService = context.read<StorageService>();
-    await storageService.saveUserName(_nameController.text);
-    await storageService.saveUserPhone(_phoneController.text);
-    await storageService.saveUserEmail(_emailController.text);
+      if (user != null) {
+        _showMessage('Registration successful! Please verify your email.');
 
-    _showMessage('${AppStrings.verificationCodeSent}');
+        // Auto-login after registration
+        final storageService = context.read<StorageService>();
+        await storageService.setAuthenticated(true);
+        await storageService.saveToken(user.uid);
+        await storageService.saveUserName(user.displayName);
+        await storageService.saveUserEmail(user.email);
+        await storageService.saveUserPhone(user.phoneNumber ?? '');
 
-    if (mounted) {
-      setState(() => _isLoading = false);
-      context.push('/otp', extra: _phoneController.text);
+        context.go('/home');
+      } else {
+        _showMessage('Registration failed. Please try again.');
+      }
+    } catch (e) {
+      _showMessage('Error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 

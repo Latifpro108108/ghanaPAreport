@@ -64,6 +64,17 @@ dependencies:
   
   # Toast Notifications
   fluttertoast: ^8.2.0
+  
+  # Firebase
+  firebase_core: ^2.27.0
+  firebase_auth: ^4.17.4
+  cloud_firestore: ^4.15.8
+  firebase_messaging: ^14.7.19
+  firebase_database: ^10.4.9
+  cloud_functions: ^4.5.0
+  
+  # Local Notifications
+  flutter_local_notifications: ^17.2.1
 
 dev_dependencies:
   flutter_test:
