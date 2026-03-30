@@ -73,6 +73,9 @@ dependencies:
   firebase_database: ^10.4.9
   cloud_functions: ^4.5.0
   
+  # Environment Variables
+  flutter_dotenv: ^5.1.0
+  
   # Local Notifications
   flutter_local_notifications: ^17.2.1
 
@@ -97,6 +100,10 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # Assets
+  assets:
+    - .env
 
   # To add assets to your application, add an assets section, like this:
   # assets:
